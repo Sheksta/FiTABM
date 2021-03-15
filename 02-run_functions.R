@@ -30,7 +30,6 @@ batch_run_func <- function(number_of_agents,
     
     append_results() # add results of current run to previous results
     
-    
   }
   
   rm(all_res_rn, current_date, envir = .GlobalEnv)
@@ -361,11 +360,15 @@ batch_run_func_f <- function(agent_name,
   allowed_params <- read_tsv('Data/allowed_params_1000.txt', col_names = F)
   # Set threshold and weights, electricity price
   sample_for_run <- allowed_params[sample(1:nrow(allowed_params), number_of_runs, replace = TRUE), ]
-
-  if(missing(agent_name)) agent_name <- "agents"
-  number_of_agents <- length(read_rds(paste('Data/', agent_name, "_1.rds", sep = "")))
   
-  if(missing(number_of_runs)) number_of_runs <- 100 
+  if(missing(agent_name)){
+    agent_name <- "agents"
+    number_of_agents <- length(read_rds(paste(agent_name, "_1.rds", sep = "")))
+  }
+  
+  if(missing(number_of_runs)){
+    number_of_runs <- 100
+  }
   
   
   initialise_vars() # create variables which will store output
@@ -501,13 +504,13 @@ batch_run_func_f <- function(agent_name,
 run_model_f <- function(agent_name, rn, w, threshold) {
   
   # Set up some parameters
-  agent_index <- sample.int(10, 1)
+  agent_index <- sample.int(5, 1)
   
   time_steps <- nrow(FiT) # number of months in time series
   
   # agents must be generated before run
   
-  agents <- read_rds(paste('Data/', agent_name, "_", agent_index, ".rds", sep = ""))
+  agents <- read_rds(paste(agent_name, "_", agent_index, ".rds", sep = ""))
   number_of_agents <- length(agents)
   
   # initial reference capacity:
