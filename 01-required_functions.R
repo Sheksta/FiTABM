@@ -172,6 +172,7 @@ process_inst_data <- function(){
   return(all_inst)
 }
 
+
 set_FiT <- function(start_date, end_date, FiT_end_date, FiT_type, red_frac, init_fit, final_fit, exp_tar){
   if (end_date == FiT_end_date){
     FiT_zero <- NULL
