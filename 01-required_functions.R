@@ -48,7 +48,7 @@ load_data <- function(start_date, end_date, FiT_end_date, FiT_type, red_frac, in
   
   
   elec_price_time <<- read_csv("Data/electricityprices.csv", col_names = F, col_types = cols())
-  elec_price_time[7,] <<- c(2016, 17.33) # projection for 2016
+  elec_price_time[7,] <<- list(2016, 17.33) # projection for 2016
   
   owner_occupiers <<- read_csv("Data/owner_occupiers.csv", col_names = F, col_types = cols()) %>% mutate(X2 = X2*1000)
   
@@ -82,7 +82,7 @@ load_data <- function(start_date, end_date, FiT_end_date, FiT_type, red_frac, in
   #---------------------------------------------------------#
   
   
-  # Population data
+  #! Population data
   
   population <- read_csv("Data/population_mid2012.csv", col_names = FALSE, col_types = cols()) %>% arrange(X1)
   
@@ -105,6 +105,10 @@ load_data <- function(start_date, end_date, FiT_end_date, FiT_type, red_frac, in
   mus <<- data.frame(matrix(ncol = 5, nrow = 10))
   sigmas <<- data.frame(matrix(ncol = 5, nrow = 10))
   
+  #CREATE PARAMETERS FOR LOG-NORMAL DISTRIBUTION
+  
+  
+  ## Header: Create Log-Norm Distribution
   for (i in 1:5){
     mean <- means[[i+1]]
     median <- medians[[i+1]]
@@ -165,7 +169,7 @@ process_inst_data <- function(){
   
   all_inst %<>% filter(technology_type == "Photovoltaic")
   
-  all_inst %<>% select(technology_type, installed_capacity, commissioned_date, installationtype) 
+  all_inst %<>% dplyr::select(technology_type, installed_capacity, commissioned_date, installationtype) 
   
   all_inst$commissioned_date %<>% dmy
   
@@ -232,11 +236,11 @@ set_dep_caps <- function(start_date, end_date, FiT_end_date, FiT_type, cap, exp_
     dep_cap %<>% mutate(cap = orig_cap, inst_cap = NA) %>%
       mutate(q_dates = dmy(q_dates))
     FiT_list <- dep_cap$FiT
-    dep_cap_n <- dep_cap %<>% select(q_dates, orig_cap, cap, inst_cap)
+    dep_cap_n <- dep_cap %<>% dplyr::select(q_dates, orig_cap, cap, inst_cap)
     
   } else if (FiT_type == "real_f_ext") {
     dep_cap <- read_csv("Data/real_dep_cap.csv", skip = 1, col_names = c("q_dates", "orig_cap", "FiT"), 
-                        col_types = cols()) %>% mutate(q_dates = dmy(q_dates)) %>% select(q_dates, orig_cap)
+                        col_types = cols()) %>% mutate(q_dates = dmy(q_dates)) %>% dplyr::select(q_dates, orig_cap)
     dep_cap_ext <- data.frame(q_dates = seq(dmy("1apr2019"), dmy("1jan2021"), by = '3 month'),
                               orig_cap = 62.1:69.1)
     dep_cap <- rbind(dep_cap, dep_cap_ext)
@@ -573,7 +577,7 @@ calc_LCOE <- function(adpts, rn, number_of_agents) {
     adopt_costs %<>% mutate(weight_scaled = output_scaled/tot_output_scaled, 
                             run_number = as.factor(rep(rn, nrow(adopt_costs))))
     
-    adopt_costs %<>% select(adopt_date, LCOE_ind, weight_scaled, run_number, output_scaled)
+    adopt_costs %<>% dplyr::select(adopt_date, LCOE_ind, weight_scaled, run_number, output_scaled)
     
     LCOE_weighted_scaled <- sum(adopt_costs$LCOE_ind*adopt_costs$weight_scaled)
   }
@@ -615,7 +619,7 @@ which_owner_year <- function(x) {
 }
 
 which_PV_cost <- function(x) {
-  kW_price %>% filter(X1 == x) %>% select(X2) %>% unlist %>% unname
+  kW_price %>% filter(X1 == x) %>% dplyr::select(X2) %>% unlist %>% unname
   
 }
 
@@ -792,13 +796,13 @@ load_plot_sim_data <- function(save_name, plot_u = T, plot_cost = T, plot_prod =
   
   dep_sd <- sd(avg_u$tot_inst_cap[avg_u$time_series == max(avg_u$time_series)])
   subs_sd <- cost %>% group_by(run_number) %>% summarise(subs = sum(annual_cost)/12) %>% 
-    select(subs) %>% unlist %>% sd
+    dplyr::select(subs) %>% unlist %>% sd
   priv_sd <- cost_priv %>% group_by(run_number) %>% summarise(priv = max(cum_cost)) %>% 
-    select(priv) %>% unlist %>% sd
+    dplyr::select(priv) %>% unlist %>% sd
   ann_sd <- cost %>% group_by(run_number) %>% summarise(ann = max(annual_cost)) %>%
-    select(ann) %>% unlist %>% sd 
+    dplyr::select(ann) %>% unlist %>% sd 
   prod_sd <- cum_prod %>% group_by(run_number) %>% summarise(prod = sum(current_prod)/12) %>%
-    select(prod) %>% unlist %>% sd
+    dplyr::select(prod) %>% unlist %>% sd
   
   
   cat("Final deployment at ", as.character(tail(averages$time_series, 1)), " (MW) = ", 
@@ -983,7 +987,7 @@ future_PV_price <- function(init_PV, x, start_date, end_date) {
   
   no_years <- length(year(start_date):year(end_date)) + 1
   year_cost <- vector(length = no_years)
-  year_cost[1] <- init_PV %>% filter(X1 == start_date) %>% select(X2) %>% unlist %>% unname
+  year_cost[1] <- init_PV %>% filter(X1 == start_date) %>% dplyr::select(X2) %>% unlist %>% unname
   for (i in 1:(no_years-1)) {
     year_cost[i+1] <- year_cost[i] - x*year_cost[i]
   }
@@ -1339,7 +1343,7 @@ calc_LCOE_f <- function(adpts, rn, number_of_agents) {
     adopt_costs %<>% mutate(weight_scaled = output_scaled/tot_output_scaled, 
                             run_number = as.factor(rep(rn, nrow(adopt_costs))))
     
-    adopt_costs %<>% select(adopt_date, LCOE_ind, weight_scaled, run_number, output_scaled)
+    adopt_costs %<>% dplyr::select(adopt_date, LCOE_ind, weight_scaled, run_number, output_scaled)
     
     LCOE_weighted_scaled <- sum(adopt_costs$LCOE_ind*adopt_costs$weight_scaled)
   }
@@ -1361,7 +1365,7 @@ which_PV_cost_f <- function(x) {
     mutate(X1 = dmy(X1)) %>% filter(X1 < kW_price$X1[1])
   
   kW_price_all <- rbind(kW_price, kW_price_h)
-  PV_cost <- kW_price_all %>% filter(X1 == x) %>% select(X2) %>% unlist %>% unname
+  PV_cost <- kW_price_all %>% filter(X1 == x) %>% dplyr::select(X2) %>% unlist %>% unname
   PV_cost <- PV_cost[1]
   
   
@@ -1405,7 +1409,7 @@ consumer_cost <- function(avg_cost, cum_prod_avg, r, start_year, end_year){
   
   annual_cost <- avg_cost %>% mutate(year = year(time_series)) %>% group_by(year) %>% 
     summarise(ann_cost = sum(annual_cost/12)) %>% mutate(n = year - 2008, d = 1/(1+r)^n, d_cost = d*ann_cost) %>%
-    filter(year < end_year) %>% select(year, ann_cost, d, d_cost)
+    filter(year < end_year) %>% dplyr::select(year, ann_cost, d, d_cost)
   
   d_cost <- annual_cost %>% summarise(cost = sum(d_cost)) %>% unlist
   cat("Discounted FiT cost up to ", end_year, " = Â£", d_cost/1e9, " billion", sep = "", "\n")
@@ -1418,7 +1422,7 @@ consumer_cost <- function(avg_cost, cum_prod_avg, r, start_year, end_year){
     ann_prod <- rbind(ann_prod, ann_prod_n)
   }
   
-  ann_prod %<>% select(ann_prod)
+  ann_prod %<>% dplyr::select(ann_prod)
   
   ann_prod %<>% mutate(value = 0.03*ann_prod)
   cost_to_cons <- cbind(ann_prod, annual_cost) %>% mutate(cost = (ann_cost - value)*d) 

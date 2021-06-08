@@ -131,7 +131,7 @@ batch_run_func <- function(number_of_agents,
 #------------------------------- Individual runs --------------------------------#
 
 run_model <- function(number_of_agents, rn, w, threshold) {
-  
+
   # Set up some parameters
   time_steps <- nrow(FiT) # number of months in time series
   
@@ -703,5 +703,4 @@ run_model_f <- function(agent_name, rn, w, threshold) {
   return(all_results)
   
   
-}
 }

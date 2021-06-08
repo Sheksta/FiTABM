@@ -12,13 +12,15 @@
 # This is the default for the data loading function:
 source('01-required_functions.R')
 source('02-run_functions.R')
-
 load_data()
 
 # To run the simulation:
+results <- batch_run_func(number_of_runs = 1, number_of_agents = 500)
 
-results <- batch_run_func(number_of_runs = 10, number_of_agents = 500)
-# The default number of agents is 5000, and the default number of runs is 100. 
+## Test ABC
+
+
+  # The default number of agents is 5000, and the default number of runs is 100. 
 # So just running batch_run_func() does 100 runs with 5000 agents. 
 # I've put number_of_agents = 500 and number_of_runs = 10 here to speed things up.
 
