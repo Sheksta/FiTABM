@@ -10,7 +10,7 @@ library(igraph)
 library(data.table)
 library(TSrepr)
 library(protoABC)
-
+library(parallel)
 
 
 ##################################################################
@@ -325,9 +325,9 @@ abline(v=x_true[5], col="blue")
 ##################################################################
 # DUMMY with PROTO ABC WITH !!TRANSFORMS!!
 ##################################################################
-
+cl <- parallel::makeCluster(11)
 #Dummy simulate and summary (from 1000 simulations - just to minimise error from stochasticity and focus on calibration perf)
-#x_true <- c(0.237, 0.233, 0.066, 0.464, 0.751) <- These are the 'true' chosen vals simulating it.
+x_true <- c(0.237, 0.233, 0.066, 0.464, 0.751) #<- These are the 'true' chosen vals simulating it.
 obs_summ_1000_avg <- readRDS(file = "Outputs/ABC/01A_prelim_dummy_obs_summ_1000sim_avg_ABC.rds")
 
 #Declare model
@@ -365,7 +365,7 @@ misc_args <- list(obs_summ = obs_summ_1000_avg,
 
 dist_abm_pv_trans <- function(theta, misc_args){
   min_unif = 0.5
-  max_unif = 1
+  max_unif = 0.9
   # Detransform particle
   v_retr <- exp(theta[1:4])
   x <- v_retr/sum(v_retr)
@@ -433,6 +433,21 @@ dummy_prior_eval_transform <-  function(theta){
 }
 
 
+clusterEvalQ(cl, {
+  source('01-required_functions.R')
+  source('02-run_functions.R')
+  source('Code_abhi/00-ABC_required_functions.R')
+  source('Code_abhi/02-Model_development.R')
+  load_data()
+  obs_summ_1000_avg <- readRDS(file = "Outputs/ABC/01A_prelim_dummy_obs_summ_1000sim_avg_ABC.rds")
+  n_agents <- 1000
+  n_links <- 10
+  adj_net <- readRDS(file ='Data/adjacency_matrix_1000n_10links.rds')
+  misc_args <- list(obs_summ = obs_summ_1000_avg,
+                    number_of_agents = n_agents,
+                    adj = adj_net)
+})
+
 abc_post_dummy_trans <- abc_start(
   prior = dummy_prior_transform,
   method = "RABC",
@@ -448,7 +463,7 @@ abc_post_dummy_trans <- abc_start(
     print_output = TRUE
   ))
 
-readRDS(file = "Outputs/ABC/01A_prelim_trans_dummy_posterior_ABC.rds")
+saveRDS(abc_post_dummy_trans, file = "Outputs/ABC/01A_prelim_trans_dummy_posterior_ABC_first_run.rds")
 stopCluster(cl)
 
 par(mfrow=c(2,3))
@@ -463,23 +478,5 @@ abline(v=x_true[4], col="blue")
 plot(density(abc_post_dummy$X5))
 abline(v=x_true[5], col="blue")
 
-###############################################################
-# NETWORK OPTIMISATION - a.k.a can we go faster??
-###############################################################
-
-# #NETWORK OPTIMISATION BIT
-# install.packages("igraph")
-# library(igraph)
-# ?watts.strogatz.game
-g <- sample_k_regular(7000, 10, directed = FALSE, multiple = FALSE)
-plot(g, vertex.label= NA, edge.arrow.size=0.02,vertex.size = 0.5, xlab = "Small world model")
-
-V(g)$att <- as.logical(rbinom(vcount(g), 1, 0.5))
-
-system.time({
-  ma  <- get.adjacency(g)
-  att <- V(g)$att
-  res <- as.numeric(ma %*% att)
-})
 
 

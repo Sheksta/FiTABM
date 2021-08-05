@@ -4,35 +4,43 @@
 
 #--------------------------------- Batch runs -----------------------------------#
 
-batch_run_func <- function(number_of_agents, 
-                           number_of_runs, plot_u = T, plot_cost = T, plot_prod = T, save_name) {
+batch_run_func <- function(posterior_samples, number_of_agents, 
+                           number_of_runs, plot_u = T, plot_cost = T, plot_prod = T, save_name){
   
-  allowed_params <- read_tsv('Data/allowed_params_1000.txt', col_names = F)
+  # allowed_params <- read_tsv('Data/allowed_params_1000.txt', col_names = F)
   
-  sample_for_run <- allowed_params[sample(1:nrow(allowed_params), number_of_runs, replace = TRUE), ]
+  sample_for_run <- posterior_samples[sample(1:nrow(posterior_samples), number_of_runs, replace = TRUE), ]
+  initialise_vars()
   
   if(missing(number_of_agents)) number_of_agents <- 5000
   if(missing(number_of_runs)) number_of_runs <- 100
   
-  initialise_vars() # create variables which will store output
-  
-  for (i1 in 1:number_of_runs) {
-    w <- unlist(sample_for_run[i1, 1:4])
-    threshold <- unlist(sample_for_run[i1, 5])
-    if (run_w_cap == TRUE) { # Reset to original values for new run 
-      FiT <<- FiT_0
-      dep_cap <<- dep_cap_0
+   if (run_w_cap == TRUE) {
+     FiT_0 <<- FiT
+     dep_cap_0 <<- dep_cap
+   }
+
+  foreach_wrapper <- function() {
+    all_res <- foreach(i1 = 1:number_of_runs, .combine='c', .export = ls(globalenv()), .packages = c("igraph", "doParallel")) %dopar% {
+      if (run_w_cap == TRUE) {
+        FiT <<- FiT_0
+        dep_cap <<- dep_cap_0
+      }
+      w <- unlist(sample_for_run[i1, 1:4])
+      threshold <- unlist(sample_for_run[i1, 5])
+      
+      
+      res <- run_model(number_of_agents, i1, w, threshold) # run the model once
+      return(list(res))
     }
-    
-    cat(i1, w, threshold, "\n")
-    
-    all_res_rn <<- run_model(number_of_agents, i1, w, threshold) # run the model once 
-    
-    append_results() # add results of current run to previous results
-    
   }
   
-  rm(all_res_rn, current_date, envir = .GlobalEnv)
+  all_res <- foreach_wrapper()
+  
+  
+  for(i in 1:number_of_runs){
+    append_results(all_res[[i]])
+  }
   
   summarise_results(avg_u, cost, cost_priv) # calculate averages of all runs
   
@@ -182,10 +190,10 @@ run_model <- function(number_of_agents, rn, w, threshold) {
   
   # Time evolution! 
   
-  if(run_w_cap == TRUE) {
-    quarter_done <- 0 # how many quarters' capacity have already been used up?
-    exceeded <- FALSE # has the total available capacity been exceeded?
-  }
+  # if(run_w_cap == TRUE) {
+  #   quarter_done <- 0 # how many quarters' capacity have already been used up?
+  #   exceeded <- FALSE # has the total available capacity been exceeded?
+  # }
   
   for (i in 1:time_steps) {
     # set parameters for current time
@@ -344,6 +352,75 @@ run_model <- function(number_of_agents, rn, w, threshold) {
 }
 
 
+run_model_abc <- function(number_of_agents, w, threshold) {
+  
+  # Set up some parameters
+  time_steps <- nrow(FiT) # number of months in time series
+  
+  agents <- rerun(number_of_agents, 
+                  Household_Agent("N", assign_income(), assign_size(), assign_region()))
+  
+  n_links <- 10
+  
+  mean_income <- mean(extract(agents, "income"))
+  agents %<>% map(assign_LF) %>% map(assign_elec_cons) %>% map(assign_u_inc, mean_inc = mean_income) %>% 
+    map(assign_soc_network, n_ag = number_of_agents, n_l = n_links)
+  
+  adopters <- agents[map(agents, "status") == 1]
+  
+  if (length(adopters) > 0){
+    n_owners <<- owner_occupiers[[1, 2]]
+    init_cap <- sum(extract(adopters, "inst_cap"), na.rm = TRUE)*n_owners/(1000*number_of_agents)
+  }
+  else{
+    init_cap <- 0
+  }
+  
+  # Create agents: all non-adopters, assign income, size and region randomly weighted by real data
+  # assign further characteristics based on those previously assigned.
+  # Set up data frame to put data in
+  
+  avg_u <- data.frame(time_series = FiT$time_series + months(1),
+                      avg_inst_cap = vector(length = time_steps),
+                      tot_inst_cap = vector(length = time_steps)
+  )
+  
+  #---------------------------------------------------------#
+  
+  # Time evolution!
+  
+  for (i in 1:time_steps) {
+    # set parameters for current time
+    FiT_current_small <<- FiT$FiT[[i]]/100 # p to £
+    FiT_current_large <<- FiT$FiT_large[[i]]/100
+    exp_tar_current <<- FiT$exp_tar[[i]]/100 # p to £
+    kW_price_current <<- kW_price$X2[i]
+    current_date <<- FiT$time_series[i]
+    elec_index <- which(sapply(elec_price_time$X1, function(x) grep(x, current_date)) == 1)
+    elec_price <<- elec_price_time[[elec_index, 2]]/100
+    n_owners <<- owner_occupiers[[elec_index, 2]]
+    
+    agents <- agents %>% map(assign_inst_cap) %>% map(utilities, w = w, ags = agents) %>% 
+      map(decide, threshold = threshold)
+    
+    
+    adopters <- agents[map(agents, "status") == 1]
+    
+    
+    #Write data
+    if (length(adopters) > 0){
+      avg_u$avg_inst_cap[i] <- mean(extract(adopters, "inst_cap"))
+      avg_u$tot_inst_cap[i] <- sum(extract(adopters, "inst_cap"), na.rm = TRUE)*n_owners/(1000*number_of_agents)
+    }
+    else{
+      avg_u$avg_inst_cap[i] <- 0
+      avg_u$tot_ins_cap[i] <- 0
+    }
+  }
+  return(avg_u)
+}
+
+
 ##################################################################################
 ############################## Projections (future) ##############################
 ##################################################################################
@@ -368,10 +445,10 @@ batch_run_func_f <- function(agent_name,
   
   initialise_vars() # create variables which will store output
   
-  #  if (run_w_cap == TRUE) {
-  #    FiT_0 <<- FiT
-  #    dep_cap_0 <<- dep_cap
-  #  }
+   # if (run_w_cap == TRUE) {
+   #   FiT_0 <<- FiT
+   #   dep_cap_0 <<- dep_cap
+   # }
   
   for (i1 in 1:number_of_runs) {
     

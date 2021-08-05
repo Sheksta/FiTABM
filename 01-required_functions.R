@@ -15,7 +15,7 @@
 #------------------------------- 1.1 Set-up -------------------------------------#
 
 load_data <- function(start_date, end_date, FiT_end_date, FiT_type, red_frac, init_fit, final_fit, exp_tar,
-                      dep_caps = F, cap){
+                      dep_caps = FALSE, cap){
   # end_date: date up to which simulation will run
   # FiT_type: real_h, linear, perc_red
   if(missing(start_date)) start_date <- "1apr2010"
@@ -47,10 +47,10 @@ load_data <- function(start_date, end_date, FiT_end_date, FiT_type, red_frac, in
   if(init_fit < 0 | final_fit <0) stop("FiTs have to be positive")
   
   
-  elec_price_time <<- read_csv("Data/electricityprices.csv", col_names = F, col_types = cols())
+  elec_price_time <<- read_csv("Data/electricityprices.csv", col_names = FALSE, col_types = cols())
   elec_price_time[7,] <<- list(2016, 17.33) # projection for 2016
   
-  owner_occupiers <<- read_csv("Data/owner_occupiers.csv", col_names = F, col_types = cols()) %>% mutate(X2 = X2*1000)
+  owner_occupiers <<- read_csv("Data/owner_occupiers.csv", col_names = FALSE, col_types = cols()) %>% mutate(X2 = X2*1000)
   
   #---------------------------------------------------------#
   # Load factor data
@@ -72,12 +72,12 @@ load_data <- function(start_date, end_date, FiT_end_date, FiT_type, red_frac, in
   
   #---------------------------------------------------------#
   # Deployment caps
-  run_w_cap <<- F
-  if (dep_caps == T) {
+  run_w_cap <<- FALSE
+  if (dep_caps == TRUE) {
     set_dep_caps(start_date, end_date, FiT_end_date, FiT_type, cap, exp_tar)
     dep_cap_0 <<- dep_cap
     FiT_0 <<- FiT
-    run_w_cap <<- T
+    run_w_cap <<- TRUE
   }
   #---------------------------------------------------------#
   
@@ -154,6 +154,11 @@ load_libraries <- function(){
   library(reshape2)
   library(lubridate)
   library(magrittr)
+  library(igraph)
+  library(data.table)
+  library(TSrepr)
+  # library(doParallel)
+  # library(foreach)
 }
 
 
@@ -287,6 +292,17 @@ initialise_vars <- function() {
   if (run_w_cap == TRUE) FiT_levels <<- NULL
 }
 
+initialise_obs_vars <- function() {
+  avg_u_obs <<- NULL
+  cost_obs <<- NULL
+  tot_cost_obs <<- NULL
+  cost_priv_obs <<- NULL
+  tot_cost_priv_obs <<- NULL
+  LCOE_avg_obs <<- NULL
+  LCOE_data_obs <<- NULL
+  if (run_w_cap == TRUE) FiT_levels_obs <<- NULL
+}
+
 #------------------------- 1.2 Agent/model functions ----------------------------#
 
 Household_Agent <- function(a, b, c, d) {
@@ -350,12 +366,12 @@ assign_u_inc <- function(A, mean_inc) {
 
 assign_inst_cap <- function(A) {
   if (A$status == "N") { # otherwise agents who have already adopted can change inst_cap!
-    inst_cap <- 0.3*A$income/kW_price_current
-    meet_demand <- A$consumption/(A$LF*24*365)
+    inst_cap <- 0.3*A$income/kW_price_current # how much installation capacity is affordable
+    meet_demand <- A$consumption/(A$LF*24*365) # find out size needed to meet generation
     
-    if (meet_demand < inst_cap) inst_cap <- meet_demand
+    if (meet_demand < inst_cap) inst_cap <- meet_demand #if size needed to meet demand is less than 30% inc, we get that.
     
-    A$inst_cap <- inst_cap
+    A$inst_cap <- inst_cap #assign calculated capacity 
     if (inst_cap > 4) {   # would they be better off going for the lower investment?
       ret_large <- annual_return(A)
       large_cap <- A$inst_cap
@@ -441,10 +457,9 @@ soc_utility <- function(A, ags) {
   links <- length(A$network)
   no_adopters <- sum(map_int(neighbours, "status") == 1)
   u_soc <- 1/(1+exp(1.2*((links/4)-no_adopters)))
-  
 }
 
-cap_utility <- function(A) {
+cap_utility <- function(A){
   u_cap <- 1/(1+exp(-(0.2*A$income-A$inst_cap*kW_price_current)*0.0007))
 }
 
@@ -626,15 +641,26 @@ which_PV_cost <- function(x) {
 
 #------------------------------- 1.4 Processing ---------------------------------#
 
-append_results <- function() {
-  avg_u <<- rbind(avg_u, all_res_rn[[1]])
-  cost <<- rbind(cost, all_res_rn[[2]])
-  tot_cost <<- rbind(tot_cost, all_res_rn[[3]])
-  cost_priv <<- rbind(cost_priv, all_res_rn[[4]])
-  tot_cost_priv <<- rbind(tot_cost_priv, all_res_rn[[5]])
-  LCOE_avg <<- rbind(LCOE_avg, all_res_rn[[6]])
-  LCOE_data <<- rbind(LCOE_data, all_res_rn[[7]])
-  if (run_w_cap == TRUE) FiT_levels <<- rbind(FiT_levels, all_res_rn[[8]])
+append_results_obs <- function(res) {
+  avg_u_obs <<- rbind(avg_u_obs, res[[1]])
+  cost_obs <<- rbind(cost_obs, res[[2]])
+  tot_cost_obs <<- rbind(tot_cost_obs, res[[3]])
+  cost_priv_obs <<- rbind(cost_priv_obs, res[[4]])
+  tot_cost_priv_obs <<- rbind(tot_cost_priv_obs, res[[5]])
+  LCOE_avg_obs <<- rbind(LCOE_avg_obs, res[[6]])
+  LCOE_data_obs <<- rbind(LCOE_data_obs, res[[7]])
+  if (run_w_cap == TRUE) FiT_levels_obs <<- rbind(FiT_levels_obs, res[[8]])
+}
+
+append_results <- function(res) {
+  avg_u  <<- rbind(avg_u , res[[1]])
+  cost  <<- rbind(cost , res[[2]])
+  tot_cost  <<- rbind(tot_cost , res[[3]])
+  cost_priv  <<- rbind(cost_priv , res[[4]])
+  tot_cost_priv  <<- rbind(tot_cost_priv , res[[5]])
+  LCOE_avg  <<- rbind(LCOE_avg , res[[6]])
+  LCOE_data  <<- rbind(LCOE_data , res[[7]])
+  if (run_w_cap == TRUE) FiT_levels  <<- rbind(FiT_levels , res[[8]])
 }
 
 calc_prod <- function(indiv_data, number_of_runs){
@@ -681,10 +707,49 @@ summarise_results <- function(avg_u, cost, cost_priv){
   avg_cost_priv <<- cost_priv %>% group_by(time_series) %>% summarise(cum_cost = mean(cum_cost))
 }
 
+summarise_results_obs <- function(avg_u, cost, cost_priv){
+  number_of_runs_obs <- max(as.numeric(avg_u$run_number))
+  averages_obs <<- avg_u %>% group_by(time_series) %>% 
+    summarise(u_inc = mean(mean_u_inc), u_ec = mean(mean_u_ec), u_soc = mean(mean_u_soc),
+              u_cap = mean(mean_u_cap),
+              u_tot = mean(mean_u_tot), avg_inst_cap = mean(avg_inst_cap, na.rm = TRUE),  
+              sd_u_inc = sqrt(sum(sd_u_inc^2))/number_of_runs,
+              sd_u_ec = sqrt(sum(sd_u_ec^2))/number_of_runs,
+              sd_u_soc = sqrt(sum(sd_u_soc^2))/number_of_runs,
+              sd_u_cap = sqrt(sum(sd_u_cap^2))/number_of_runs,
+              sd_u_tot = sqrt(sum(sd_u_tot^2))/number_of_runs,
+              tot_inst_cap = mean(tot_inst_cap, na.rm = TRUE), 
+              frac_of_adopters = mean(frac_of_adopters, na.rm = TRUE),
+              inst_cap_diff = mean(inst_cap_diff, na.rm = TRUE))
+  
+  avg_cost_obs <<- cost %>% group_by(time_series) %>% summarise(annual_cost = mean(annual_cost))
+  
+  avg_cost_priv_obs <<- cost_priv %>% group_by(time_series) %>% summarise(cum_cost = mean(cum_cost))
+}
 
 
-load_plot_sim_data <- function(save_name, plot_u = T, plot_cost = T, plot_prod = T){
-  load_use_cap <- F
+summarise_results_median <- function(avg_u, cost, cost_priv){
+  number_of_runs <- max(as.numeric(avg_u$run_number))
+  averages <<- avg_u %>% group_by(time_series) %>% 
+    summarise(u_inc = mean(mean_u_inc), u_ec = mean(mean_u_ec), u_soc = mean(mean_u_soc),
+              u_cap = mean(mean_u_cap),
+              u_tot = mean(mean_u_tot), avg_inst_cap = mean(avg_inst_cap, na.rm = TRUE),  
+              sd_u_inc = sqrt(sum(sd_u_inc^2))/number_of_runs,
+              sd_u_ec = sqrt(sum(sd_u_ec^2))/number_of_runs,
+              sd_u_soc = sqrt(sum(sd_u_soc^2))/number_of_runs,
+              sd_u_cap = sqrt(sum(sd_u_cap^2))/number_of_runs,
+              sd_u_tot = sqrt(sum(sd_u_tot^2))/number_of_runs,
+              tot_inst_cap = median(tot_inst_cap, na.rm = TRUE), 
+              frac_of_adopters = mean(frac_of_adopters, na.rm = TRUE),
+              inst_cap_diff = mean(inst_cap_diff, na.rm = TRUE))
+  
+  avg_cost <<- cost %>% group_by(time_series) %>% summarise(annual_cost = mean(annual_cost))
+  
+  avg_cost_priv <<- cost_priv %>% group_by(time_series) %>% summarise(cum_cost = mean(cum_cost))
+}
+
+load_plot_sim_data <- function(save_name, plot_u = TRUE, plot_cost = TRUE, plot_prod = TRUE){
+  load_use_cap <- FALSE
   avg_u <<- read_rds(paste(save_name, "_avg_u.rds", sep = ""))
   cost <<- read_rds(paste(save_name, "_cost.rds", sep = ""))
   cost_priv <<- read_rds(paste(save_name, "_cost_priv.rds", sep = ""))
@@ -694,7 +759,7 @@ load_plot_sim_data <- function(save_name, plot_u = T, plot_cost = T, plot_prod =
   number_of_runs <- max(as.numeric(avg_u$run_number))
   if (file.exists(paste(save_name, "_FiT_levels.rds", sep = ""))){
     FiT_levels <<- read_rds(paste(save_name, "_FiT_levels.rds", sep = ""))
-    load_use_cap <- T
+    load_use_cap <- TRUE
   }
   
   # calculate averages of all runs
@@ -704,7 +769,7 @@ load_plot_sim_data <- function(save_name, plot_u = T, plot_cost = T, plot_prod =
     summarise_results(avg_u, cost, cost_priv) 
     sum_abs_diff <- sum(abs(averages$inst_cap_diff))
   } else {
-    future <- T
+    future <- TRUE
     summarise_results_f(avg_u, cost, cost_priv) 
   }
   # deviation from real data: sum of absolute values
@@ -721,7 +786,7 @@ load_plot_sim_data <- function(save_name, plot_u = T, plot_cost = T, plot_prod =
   cum_prod_avg <<- prod_res[[2]]
   
   
-  if(plot_u == T){
+  if(plot_u == TRUE){
     u_vars <- c("inc", "soc", "ec", "cap", "tot") # partial and total utilities
     yl <- c(expression(u[inc]), expression(u[soc]), expression(u[ec]), expression(u[cap]), expression(u[tot]))
     l <- 1
@@ -736,7 +801,7 @@ load_plot_sim_data <- function(save_name, plot_u = T, plot_cost = T, plot_prod =
                                          ymin = get(paste("u_", app, sep = "")) - get(paste("sd_u_", app, sep = "")),
                                          ymax = get(paste("u_", app, sep = "")) + get(paste("sd_u_", app, sep = ""))),
                     alpha = 0.15) +
-        ylab(yl[l]) + xlab("Date") + theme(legend.position = "none") + coord_cartesian(expand = F) 
+        ylab(yl[l]) + xlab("Date") + theme(legend.position = "none") + coord_cartesian(expand = FALSE) 
       print(p)
       l <- l+1
     }
@@ -763,7 +828,7 @@ load_plot_sim_data <- function(save_name, plot_u = T, plot_cost = T, plot_prod =
   )
   
   
-  if (plot_cost == T){
+  if (plot_cost == TRUE){
     print(ggplot() + theme_bw() + 
             geom_line(data = cost, aes(x = time_series, y = annual_cost/1e6, group = run_number), alpha = 0.2)+
             geom_line(data = avg_cost, aes(x = time_series, y = annual_cost/1e6), color = "black", size = 1)+
@@ -779,14 +844,14 @@ load_plot_sim_data <- function(save_name, plot_u = T, plot_cost = T, plot_prod =
     
   }
   
-  if (plot_prod == T){
+  if (plot_prod == TRUE){
     print(ggplot() + theme_bw() + 
             geom_line(data = cum_prod, aes(x = time_series, y = current_prod/1e6, group = run_number), alpha = 0.2) +
             geom_line(data = cum_prod_avg, aes(x=time_series, y = current_prod/1e6), size = 1) +
             ylab("Annual production (MWh/yr)") + xlab("Date"))
   }
   
-  if (load_use_cap == T) {
+  if (load_use_cap == TRUE) {
     avg_FiT <- FiT_levels %>% group_by(time_series) %>% summarise(FiT = mean(FiT))
     print(ggplot() + geom_line(data = FiT_levels, aes(x = time_series, y = FiT, group = run_number,
                                                       color = run_number)) +
@@ -832,7 +897,7 @@ load_plot_sim_data <- function(save_name, plot_u = T, plot_cost = T, plot_prod =
 
 load_data_f <- function(start_date, end_date, FiT_end_date, FiT_type, red_frac, init_fit, final_fit, exp_tar,
                         elec_trend, PV_trend,
-                        dep_caps = F, cap){
+                        dep_caps = FALSE, cap){
   
   # end_date: date up to which simulation will run
   # FiT_type: real_h, linear, perc_red, ann_perc_red
@@ -855,14 +920,14 @@ load_data_f <- function(start_date, end_date, FiT_end_date, FiT_type, red_frac, 
     start_date <- "1oct2016"
     FiT_end_date <- "1mar2019"
     if (end_date < FiT_end_date) end_date <- FiT_end_date
-    dep_caps <- T
+    dep_caps <- TRUE
   }
   
   if(FiT_type == "real_f_ext"){
     start_date <- "1oct2016"
     FiT_end_date <- "1mar2021"
     if (end_date < FiT_end_date) end_date <- FiT_end_date
-    dep_caps <- T
+    dep_caps <- TRUE
   }
   
   FiT_end_date <- dmy(FiT_end_date)
@@ -883,11 +948,11 @@ load_data_f <- function(start_date, end_date, FiT_end_date, FiT_type, red_frac, 
   
   #---------------------------------------------------------#
   
-  elec_price_time <- read_csv("Data/electricityprices.csv", col_names = F, col_types = cols())
+  elec_price_time <- read_csv("Data/electricityprices.csv", col_names = FALSE, col_types = cols())
   elec_price_time[7,] <- c(2016, 17.33) # projection for 2016
   elec_price_time <<- future_elec_price(elec_price_time, elec_trend)
   
-  owner_occupiers <- read_csv("Data/owner_occupiers.csv", col_names = F, col_types = cols()) %>% mutate(X2 = X2*1000)
+  owner_occupiers <- read_csv("Data/owner_occupiers.csv", col_names = FALSE, col_types = cols()) %>% mutate(X2 = X2*1000)
   
   owner_occupiers <<- data.frame(X1 = time_years, 
                                  X2 = owner_occupiers$X2[[7]])
@@ -910,12 +975,12 @@ load_data_f <- function(start_date, end_date, FiT_end_date, FiT_type, red_frac, 
   
   #---------------------------------------------------------#
   # Deployment caps
-  run_w_cap <<- F
-  if (dep_caps == T) {
+  run_w_cap <<- FALSE
+  if (dep_caps == TRUE) {
     set_dep_caps(start_date, end_date, FiT_end_date, FiT_type, cap, exp_tar)
     dep_cap_0 <<- dep_cap
     FiT_0 <<- FiT
-    run_w_cap <<- T
+    run_w_cap <<- TRUE
   }
   #---------------------------------------------------------#
   # Population data
@@ -1371,7 +1436,7 @@ which_PV_cost_f <- function(x) {
   
 }
 which_owner_year_f <- function(x) {
-  owner_occupier_h <- read_csv("Data/owner_occupiers.csv", col_names = F, col_types = "in") %>% 
+  owner_occupier_h <- read_csv("Data/owner_occupiers.csv", col_names = FALSE, col_types = "in") %>% 
     mutate(X2 = X2*1000)
   owner_occupier_all <- rbind(owner_occupier_h, owner_occupiers)
   owner_occupier_all$X2[owner_occupier_all$X1 == as.numeric(year(x))][1]
